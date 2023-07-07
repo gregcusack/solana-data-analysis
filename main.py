@@ -134,22 +134,26 @@ def run_end_check_filtering(df, percent_diff, data_name):
         
     # Filter the original DataFrame based on the filtered host_ids
     df_filtered = df[~df["host_id"].isin(filtered_host_ids)]
+
     return df_filtered
 
 def find_large_changes_in_data_between_points(df, percentile, data_type):
     data_name = "mean_" + data_type
     percentage_threshold = percentile  # Desired percentage increase threshold
+    start_datetime = pd.to_datetime("2023-07-03 04:10:00")
 
     # Calculate the percentage change within each host_id group
     df['percentage_change'] = df.groupby('host_id')[data_name].pct_change() * 100
 
     # Filter the dataframe based on the desired percentage increase threshold
-    increased_df = df[df['percentage_change'] >= percentage_threshold]
+    # increased_df = df[df['percentage_change'] >= percentage_threshold]
+    increased_df = df[(df['percentage_change'] >= percentage_threshold) & (df['time'] >= start_datetime)]
+
 
     # Get the unique host_ids with increased stake
     unique_host_ids = increased_df['host_id'].unique()
     # print(unique_host_ids)
-    print("Unique Host IDs that increased by " + str(percentile) + "%: " + str(len(unique_host_ids)))
+    # print("Unique Host IDs that increased by " + str(percentile) + "%: " + str(len(unique_host_ids)))
 
 
     df_filtered = df[df['host_id'].isin(unique_host_ids)].copy()
