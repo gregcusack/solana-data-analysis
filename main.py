@@ -2,6 +2,7 @@ import pandas as pd
 import json
 import matplotlib.pyplot as plt
 import sys
+import mplcursors
 
 stake_columns_to_drop = [
     "lastVote", 
@@ -17,13 +18,15 @@ version_columns_to_drop = [
     "time",
 ]
 
-def validator_messages():
-    df = pd.read_csv ('../7_2_4am-7_4_4am_1hr_packets_sent_push_messages_count_no_version.csv')
+def get_validator_data(data_type):
+    file_name = "../data/"+ data_type + "_7_2_4am_7_6_4am_1hr.csv"
+    # df = pd.read_csv ('../data/" + data_type + "packets_sent_gossip_requests_count_7_2_4am-7_4_4am_1hr.csv')
+    df = pd.read_csv(file_name)
     df["time"] = pd.to_datetime(df["time"], format="%Y-%m-%dT%H:%M:%S.%fZ")
     return df
 
-def validator_stakes():
-    data = json.load(open('../validator_stakes.json'))
+def get_validator_stakes():
+    data = json.load(open('../data/validator_stakes.json'))
     stakes = pd.DataFrame(data["validators"])
     stakes = stakes.drop(stake_columns_to_drop, axis=1)
 
@@ -43,47 +46,29 @@ def merge_dataframes(df1, df2):
 
     return all_data
 
-def plot_dataframe(df):
-    # Group the data by "host_id" and plot each group
-    df = df.groupby("host_id")
-    for host_id, group in df:
-        plt.plot(group["time"], group["mean_packets_sent_gossip_requests_count"], label=host_id)
-
-    # Set the x-axis label
-    plt.xlabel("time")
-
-    # Set the y-axis label
-    plt.ylabel("mean_packets_sent_gossip_requests_count")
-
-    # Add a legend to identify each line
-    plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
-
-    # Display the plot
-    plt.show()
-
-def plot_dataframe_percentile(df, bottom_percentile, top_percentile):
+def get_dataframe_percentile(df, bottom_percentile, top_percentile):
     # Calculate the threshold for the top 10% of "activatedStake"
-    # top_n_threshold = 1 - df["activatedStake"].quantile(1-percentile)
-
-    # # Filter the data for host_ids in the top 10%
-    # df = df[df["activatedStake"] >= top_n_threshold]
 
     bottom_threshold = df["activatedStake"].quantile(bottom_percentile/100)
     top_threshold = df["activatedStake"].quantile(top_percentile/100)
 
     df = df[df["activatedStake"].between(bottom_threshold, top_threshold)]
+    
+    unique_host_ids = df['host_id'].unique()
+    print("Unique Host IDs in percentile: " + str(len(unique_host_ids)))
 
+    return df
+
+def plot_dataframe(df, plot_title, data_type, set_y_axis_limits):
     # Group the data by "host_id" and plot each group
+    data_name = "mean_" + data_type
+    lines = []
     groupby_obj = df.groupby("host_id")
     for host_id, group in groupby_obj:
         label = f"{host_id} ({group['activatedStake'].iloc[0]})"
-        plt.plot(group["time"], group["mean_packets_sent_gossip_requests_count"], label=label)
+        line, = plt.plot(group["time"], group[data_name], label=label)
+        lines.append(line)
 
-    # for index, col in df.iterrows():
-    #     if col['host_id'] == '5D1fNXzvv5NjV1ysLjirC4WY92RNsVH18vjmcszZd8on':
-    #         print(col)
-
-    ##################
     line_time = pd.to_datetime("2023-07-03 04:10:00")
     plt.axvline(x=line_time, color='red', linestyle='--', label='1.16.2 Activation Date')
 
@@ -91,56 +76,148 @@ def plot_dataframe_percentile(df, bottom_percentile, top_percentile):
     plt.xlabel("time")
 
     # Set the y-axis label
-    plt.ylabel("mean_packets_sent_gossip_requests_count")
+    plt.ylabel(data_name)
     
-    try:
-        # Get the current y-axis tick values
-        _, yticks = plt.yticks()
-        yticks = pd.to_numeric([ytick.get_text() for ytick in yticks])
-
-
-        # Add horizontal tick bars at y-axis tick positions
-        for ytick in yticks:
-            plt.axhline(y=ytick, color='gray', linestyle='dotted')
-    except ValueError as e:
-        print("error: " + str(e))
-
-    # Add a legend to identify each line
-    # plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
     # Place the legend below the graph
-    plt.legend(bbox_to_anchor=(0.5, -0.15), loc="upper center", ncol=2, frameon=False)
+    plt.legend(bbox_to_anchor=(0.5, -0.05), loc="upper center", ncol=3, frameon=False, fontsize='small')
+
+    if set_y_axis_limits:
+        y_min = 9000
+        y_max = 23000
+        # Set the y-axis limits
+        plt.ylim(y_min, y_max)
 
     # Adjust the layout to accommodate the legend
     plt.subplots_adjust(bottom=0.25)
+    plt.grid()
 
-    # Set the chart title
-    plt.title("Packets Sent Push Messages Count. " + str(bottom_percentile) + "-" + str(top_percentile) + "%-ile by stake")
+    # # Set the chart title
+    # plt.title("Packets Sent Push Messages Count. " + str(bottom_percentile) + "-" + str(top_percentile) + "%-ile by stake")
+    plt.title(data_name + ": " + plot_title)
 
-    df = df.drop_duplicates(subset=['host_id'])
-    for index, col in df.iterrows():
-        print(col['host_id'])
+    # Create the cursor object
+    cursor = mplcursors.cursor(hover=True)
 
+    # Add tooltips to the lines
+    for line in lines:
+        tooltip_text = line.get_label()
 
+        @cursor.connect("add")
+        def on_add(sel):
+            # Get the label from the hovered line
+            label = sel.annotation.get_text()
+
+            # Update the cursor's annotation with the new label
+            sel.annotation.set_text(label)
+            
     # Display the plot
     plt.show()
 
+def run_end_check_filtering(df, percent_diff, data_name):
+    filtered_host_ids = []
+    # Group the data by host_id
+    groupby_obj = df.groupby("host_id")
+    
+    for host_id, group in groupby_obj:
+        # Get the first 5 entries of messages sent
+        first_5_entries = group.head(10)[data_name]
+        
+        # Get the last 5 entries of messages sent
+        last_5_entries = group.tail(10)[data_name]
+        
+        # Calculate the percentage difference between the first and last 5 entries
+        percent_change = (last_5_entries.mean() - first_5_entries.mean()) / first_5_entries.mean() * 100
+        
+        # Check if the percentage difference is within the specified threshold
+        if percent_change <= percent_diff:
+            filtered_host_ids.append(host_id)
+        
+    # Filter the original DataFrame based on the filtered host_ids
+    df_filtered = df[~df["host_id"].isin(filtered_host_ids)]
+    return df_filtered
+
+def find_large_changes_in_data_between_points(df, percentile, data_type):
+    data_name = "mean_" + data_type
+    percentage_threshold = percentile  # Desired percentage increase threshold
+
+    # Calculate the percentage change within each host_id group
+    df['percentage_change'] = df.groupby('host_id')[data_name].pct_change() * 100
+
+    # Filter the dataframe based on the desired percentage increase threshold
+    increased_df = df[df['percentage_change'] >= percentage_threshold]
+
+    # Get the unique host_ids with increased stake
+    unique_host_ids = increased_df['host_id'].unique()
+    # print(unique_host_ids)
+    print("Unique Host IDs that increased by " + str(percentile) + "%: " + str(len(unique_host_ids)))
+
+
+    df_filtered = df[df['host_id'].isin(unique_host_ids)].copy()
+
+    df_filtered = run_end_check_filtering(df_filtered, percentile * 0.6, data_name)
+    # df_filtered = run_end_check_filtering(df_filtered, 3, data_name)
+
+
+    unique_host_ids = df_filtered['host_id'].unique()
+    print("Unique Host IDs that increased by " + str(percentile) + "%: " + str(len(unique_host_ids)))
+
+
+    return df_filtered
+
+
+def find_large_changes_in_data_between_ends(df, percent_diff, data_type):
+    data_name = "mean_" + data_type
+    df_filtered = run_end_check_filtering(df, percent_diff, data_name)
+
+    unique_host_ids = df_filtered['host_id'].unique()
+    print("Unique Host IDs that increased by " + str(percent_diff) + "%: " + str(len(unique_host_ids)))
+
+    return df_filtered
+
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    if len(sys.argv) < 5:
         print("error. need to pass in top and bottom percentile: python main.py <bottom> <top>")
         sys.exit(-1)
 
-    bottom_percentile = int(sys.argv[1])
-    top_percentile = int(sys.argv[2])
+    data_type = sys.argv[1]
+    bottom_percentile = int(sys.argv[2])
+    top_percentile = int(sys.argv[3])
+    percentile = float(sys.argv[4])
 
-    egress_messages = validator_messages()
-    stakes = validator_stakes()
+    host_id = ''
+    if len(sys.argv) == 6:
+        host_id = sys.argv[5]
 
-    df = merge_dataframes(egress_messages, stakes)
+    data = get_validator_data(data_type)
+    stakes = get_validator_stakes()
+
+    df = merge_dataframes(data, stakes)
     df.info()
 
-    # # plot_dataframe(df)
+    percentile_df = get_dataframe_percentile(df, bottom_percentile, top_percentile)
+    plot_title = str(bottom_percentile) + "-" + str(top_percentile) + "%-ile by stake"
+    plot_dataframe(percentile_df, plot_title, data_type, False)
 
-    plot_dataframe_percentile(df, bottom_percentile, top_percentile)
+    increased_df_1 = find_large_changes_in_data_between_points(percentile_df, percentile, data_type)
+    # plot_title = "Host IDs in " + plot_title + " that increased by more than " + str(percentile) + "% after 1.16.2 activation"
+    # plot_dataframe(increased_df_1, plot_title, False)
+
+    increased_df_2 = find_large_changes_in_data_between_ends(percentile_df, percentile, data_type)
+    # plot_title = "Host IDs in " + plot_title + " that increased by more than " + str(percentile) + "% after 1.16.2 activation"
+    # plot_dataframe(increased_df_2, plot_title, False)
 
 
+    union_df = pd.concat([increased_df_1, increased_df_2])
+    union_df = union_df.sort_values(by='time')
+    unique_host_ids = union_df['host_id'].unique()
+    print("Unique Host IDs that increased by " + str(percentile) + "%: " + str(len(unique_host_ids)))
+    
+    plot_title = "Host IDs in " + plot_title + " that increased by more than " + str(percentile) + "% after 1.16.2 activation"
+    plot_dataframe(union_df, plot_title, data_type, False)
+
+
+    if host_id != '':
+        plot_title = "Host ID: " + host_id
+        df_specific_host = df[df['host_id'] == host_id].copy()
+        plot_dataframe(df_specific_host, plot_title, data_type, False)
