@@ -191,7 +191,9 @@ def print_query(data_type, host_ids):
         WHERE time > :dashboardTime: AND time < :upperDashboardTime: \
         AND "
 
-    ending = "GROUP BY time(1h), \"host_id\" FILL(null)"
+    # ending = "GROUP BY time(1h), \"host_id\" FILL(null)"
+    ending = "GROUP BY time(1h) FILL(null)"
+
 
     query = start + host_ids_string + ending
     print(query)
@@ -209,7 +211,7 @@ def get_df_post_activation(df):
     return filtered_df
 
 if __name__ == "__main__":
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 6:
         print("error. need to pass in top and bottom percentile: python main.py <bottom> <top>")
         sys.exit(-1)
 
@@ -217,39 +219,37 @@ if __name__ == "__main__":
     bottom_percentile = int(sys.argv[2])
     top_percentile = int(sys.argv[3])
     percentile = float(sys.argv[4])
+    plot_flag = sys.argv[5].lower() == 'true'
+    print(plot_flag)    
 
     host_id = ''
-    if len(sys.argv) == 6:
-        host_id = sys.argv[5]
+    if len(sys.argv) == 7:
+        host_id = sys.argv[6]
 
     data = get_validator_data(data_type)
     stakes = get_validator_stakes()
+    print("total nodes: " + str(len(stakes)))
+
 
     df = merge_dataframes(data, stakes)
 
     percentile_df = get_dataframe_percentile(df, bottom_percentile, top_percentile)
     plot_title = str(bottom_percentile) + "-" + str(top_percentile) + "%-ile by stake"
-    plot_dataframe(percentile_df, plot_title, data_type, False)
+    if plot_flag:
+        plot_dataframe(percentile_df, plot_title, data_type, False)
+    unique_host_ids = percentile_df['host_id'].unique()
+    print_query(data_type, unique_host_ids)
 
     df_post_activation = get_df_post_activation(percentile_df)
 
-    # increased_df_1 = find_large_changes_in_data_between_points(df_post_activation, percentile, data_type)
-    # plot_title = "Host IDs in " + plot_title + " that increased by more than " + str(percentile) + "% after 1.16.2 activation"
-    # plot_dataframe(increased_df_1, plot_title, False)
-
-    host_id_to_check = '3si45SHHXsP8C6PVo1Zcpcry7DuivvogscAA63D8AKmR'
-    # if df['host_id'].isin([host_id_to_check]).any():
-    #     print(host_id_to_check + " in large changes betw. points")
+    to_drop_if_nan = "mean_" + data_type
+    df_post_activation = df_post_activation.dropna(subset=[to_drop_if_nan])
 
     # increased_df_2 = find_large_changes_in_data_between_ends(percentile_df, percentile, data_type)
     increased_df_2 = find_large_changes_in_data_between_ends(df_post_activation, percentile, data_type)
     increased_df_3 = find_large_changes_in_data_between_ends(percentile_df, percentile, data_type)
 
-    # plot_title = "Host IDs in " + plot_title + " that increased by more than " + str(percentile) + "% after 1.16.2 activation"
-    # plot_dataframe(increased_df_2, plot_title, False)
 
-    if df['host_id'].isin([host_id_to_check]).any():
-        print(host_id_to_check + " in large changes betw ends")
 
     # union_df = pd.concat([increased_df_1, increased_df_2])
     # union_df = increased_df_1.merge(increased_df_2, on='host_id', how='inner')
@@ -258,15 +258,14 @@ if __name__ == "__main__":
     # union_df = union_df.sort_values(by='time')
     # unique_host_ids = union_df['host_id'].unique()
     unique_host_ids = union_df['host_id'].unique()
-    print(type(unique_host_ids))
     print("Unique Host IDs that increased by " + str(percentile) + "%: " + str(len(unique_host_ids)))
     
     print_query(data_type, unique_host_ids)
     # for host_id_val in unique_host_ids:
     #     print(host_id_val)
-
-    plot_dataframe(increased_df_2, plot_title, data_type, False)
-    plot_dataframe(increased_df_3, plot_title, data_type, False)
+    if plot_flag:
+        plot_dataframe(increased_df_2, plot_title, data_type, False)
+        plot_dataframe(increased_df_3, plot_title, data_type, False)
 
     print("------------------------------")
     unique_host_ids_2 = increased_df_2['host_id'].unique()
@@ -283,11 +282,12 @@ if __name__ == "__main__":
 
     df = df[df['host_id'].isin(unique_host_ids)]
     plot_title = "Host IDs in " + plot_title + " that increased by more than " + str(percentile) + "% after 1.16.2 activation"
-    plot_dataframe(df, plot_title, data_type, False)
+    if plot_flag:
+        plot_dataframe(df, plot_title, data_type, False)
     # plot_dataframe(union_df, plot_title, data_type, False)
 
 
-    if host_id != '':
+    if host_id != '' and plot_flag:
         plot_title = "Host ID: " + host_id
         df_specific_host = df[df['host_id'] == host_id].copy()
         plot_dataframe(df_specific_host, plot_title, data_type, False)
