@@ -139,37 +139,30 @@ def run_end_check_filtering(df, percent_diff, data_name):
 
     return df_filtered
 
-def find_large_changes_in_data_between_points(df, percentile, data_type):
+def calculate_percent_change(group, data_name, host_id):
+    first_5_entries = group.head(5)[data_name]
+    last_5_entries = group.tail(5)[data_name]
+    if host_id == "2qcfDTvKHzp2RM8ZsAqogZinajULNnDa5a7yQFd3FrPs":
+        print("found host_id: " + str(host_id))
+        print(first_5_entries)
+        print(last_5_entries)
+    percent_change = (last_5_entries.mean() - first_5_entries.mean()) / first_5_entries.mean() * 100
+    return percent_change
+
+def create_percent_change_table(df, data_type):
     data_name = "mean_" + data_type
-    percentage_threshold = percentile  # Desired percentage increase threshold
-    start_datetime = pd.to_datetime("2023-07-03 04:10:00")
+    groupby_obj = df.groupby("host_id")
+    filtered_data = []
 
-    # Calculate the percentage change within each host_id group
-    df['percentage_change'] = df.groupby('host_id')[data_name].pct_change() * 100
+    specific_data = df[df["host_id"] == "2qcfDTvKHzp2RM8ZsAqogZinajULNnDa5a7yQFd3FrPs"]
+    print(specific_data)
 
-    # Filter the dataframe based on the desired percentage increase threshold
-    increased_df = df[df['percentage_change'] >= percentage_threshold]
-    # increased_df = df[(df['percentage_change'] >= percentage_threshold) & (df['time'] >= start_datetime)]
+    for host_id, group in groupby_obj:
+        percent_change = calculate_percent_change(group, data_name, host_id)
+        filtered_data.append({"host_id": host_id, "activatedStake": group["activatedStake"].iloc[0], "percent_change": percent_change})
 
-
-    # Get the unique host_ids with increased stake
-    unique_host_ids = increased_df['host_id'].unique()
-    # print(unique_host_ids)
-    # print("Unique Host IDs that increased by " + str(percentile) + "%: " + str(len(unique_host_ids)))
-
-
-    df_filtered = df[df['host_id'].isin(unique_host_ids)].copy()
-
-    df_filtered = run_end_check_filtering(df_filtered, percentile * 0.6, data_name)
-    # df_filtered = run_end_check_filtering(df_filtered, 3, data_name)
-
-
-    unique_host_ids = df_filtered['host_id'].unique()
-    print("Unique Host IDs that increased by " + str(percentile) + "%: " + str(len(unique_host_ids)))
-
-
-    return df_filtered
-
+    new_df = pd.DataFrame(filtered_data)
+    return new_df
 
 def find_large_changes_in_data_between_ends(df, percent_diff, data_type):
     data_name = "mean_" + data_type
@@ -191,21 +184,22 @@ def print_query(data_type, host_ids):
         WHERE time > :dashboardTime: AND time < :upperDashboardTime: \
         AND "
 
-    # ending = "GROUP BY time(1h), \"host_id\" FILL(null)"
-    ending = "GROUP BY time(1h) FILL(null)"
+    ending = "GROUP BY time(1h), \"host_id\" FILL(null)"
+    # ending = "GROUP BY time(1h) FILL(null)"
 
 
     query = start + host_ids_string + ending
     print(query)
 
-def get_df_post_activation(df):
+def get_df_after_specific_time(df, specific_date):
     filtered_df = df.copy()
 
     # Convert the date column to datetime if needed
     filtered_df['time'] = pd.to_datetime(filtered_df['time'])
 
     # Filter out values after a specific date and time
-    specific_date = pd.to_datetime("2023-07-02 16:10:00")
+    # specific_date = pd.to_datetime("2023-07-02 16:10:00")
+    # specific_date = pd.to_datetime("2023-07-02 23:10:00")
     filtered_df = filtered_df.loc[filtered_df['time'] >= specific_date]
 
     return filtered_df
@@ -230,6 +224,9 @@ if __name__ == "__main__":
     stakes = get_validator_stakes()
     print("total nodes: " + str(len(stakes)))
 
+    specific_data = data[data["host_id"] == "2qcfDTvKHzp2RM8ZsAqogZinajULNnDa5a7yQFd3FrPs"]
+    print(specific_data)
+
 
     df = merge_dataframes(data, stakes)
 
@@ -238,56 +235,84 @@ if __name__ == "__main__":
     if plot_flag:
         plot_dataframe(percentile_df, plot_title, data_type, False)
     unique_host_ids = percentile_df['host_id'].unique()
-    print_query(data_type, unique_host_ids)
+    # print_query(data_type, unique_host_ids)
 
-    df_post_activation = get_df_post_activation(percentile_df)
+    # df_post_activation = get_df_after_specific_time(percentile_df)
+
+    df = df.sort_values(by=["host_id", "time"])  # Sort the DataFrame by host_id and time
+    df = df.groupby("host_id").apply(lambda x: x.iloc[:-1])  # Drop the last row for each host_id
+    df = df.reset_index(drop=True)  # Reset the index after dropping rows
+    df_for_table_post_activation = get_df_after_specific_time(df, pd.to_datetime("2023-07-02 23:10:00"))
+    # df_for_table_post_activation = df
 
     to_drop_if_nan = "mean_" + data_type
-    df_post_activation = df_post_activation.dropna(subset=[to_drop_if_nan])
+    df_for_table_post_activation = df_for_table_post_activation.dropna(subset=[to_drop_if_nan])
 
-    # increased_df_2 = find_large_changes_in_data_between_ends(percentile_df, percentile, data_type)
-    increased_df_2 = find_large_changes_in_data_between_ends(df_post_activation, percentile, data_type)
-    increased_df_3 = find_large_changes_in_data_between_ends(percentile_df, percentile, data_type)
+    # percent_change_table_df = create_percent_change_table(df, data_type)
+    percent_change_table_df = create_percent_change_table(df_for_table_post_activation, data_type)
+    percent_change_table_df_1 = percent_change_table_df.sort_values(by=["activatedStake", "host_id"])  # Sort the DataFrame by host_id and time
+
+    print(percent_change_table_df_1)
+
+
+    df_for_table_post_activation = get_df_after_specific_time(df, pd.to_datetime("2023-06-30 00:00:00"))
+    # df_for_table_post_activation = df
+
+    to_drop_if_nan = "mean_" + data_type
+    df_for_table_post_activation = df_for_table_post_activation.dropna(subset=[to_drop_if_nan])
+
+    # percent_change_table_df = create_percent_change_table(df, data_type)
+    percent_change_table_df = create_percent_change_table(df_for_table_post_activation, data_type)
+    percent_change_table_df_2 = percent_change_table_df.sort_values(by=["activatedStake", "host_id"])  # Sort the DataFrame by host_id and time
+
+    print(percent_change_table_df_2)
+
+    percent_change_table_df_1 = percent_change_table_df_1.rename(columns={'percent_change': 'percent_change_activation_to_end'})
+
+    merged_df = percent_change_table_df_2.merge(percent_change_table_df_1[['host_id', 'percent_change_activation_to_end']], on='host_id', how='left')
+
+    merged_df.to_csv('percent_change_table_6_30_start.csv', index=False)
+
+
+    # # increased_df_2 = find_large_changes_in_data_between_ends(percentile_df, percentile, data_type)
+    # increased_df_2 = find_large_changes_in_data_between_ends(df_post_activation, percentile, data_type)
+    # increased_df_3 = find_large_changes_in_data_between_ends(percentile_df, percentile, data_type)
 
 
 
-    # union_df = pd.concat([increased_df_1, increased_df_2])
-    # union_df = increased_df_1.merge(increased_df_2, on='host_id', how='inner')
-    union_df = merge_dataframes(increased_df_2, increased_df_3)
+    # # union_df = pd.concat([increased_df_1, increased_df_2])
+    # # union_df = increased_df_1.merge(increased_df_2, on='host_id', how='inner')
+    # union_df = merge_dataframes(increased_df_2, increased_df_3)
 
-    # union_df = union_df.sort_values(by='time')
+    # # union_df = union_df.sort_values(by='time')
+    # # unique_host_ids = union_df['host_id'].unique()
     # unique_host_ids = union_df['host_id'].unique()
-    unique_host_ids = union_df['host_id'].unique()
-    print("Unique Host IDs that increased by " + str(percentile) + "%: " + str(len(unique_host_ids)))
+    # print("Unique Host IDs that increased by " + str(percentile) + "%: " + str(len(unique_host_ids)))
     
-    print_query(data_type, unique_host_ids)
-    # for host_id_val in unique_host_ids:
-    #     print(host_id_val)
-    if plot_flag:
-        plot_dataframe(increased_df_2, plot_title, data_type, False)
-        plot_dataframe(increased_df_3, plot_title, data_type, False)
+    # print_query(data_type, unique_host_ids)
+    # # for host_id_val in unique_host_ids:
+    # #     print(host_id_val)
+    # if plot_flag:
+    #     plot_dataframe(increased_df_2, plot_title, data_type, False)
+    #     plot_dataframe(increased_df_3, plot_title, data_type, False)
 
-    print("------------------------------")
-    unique_host_ids_2 = increased_df_2['host_id'].unique()
-    print_query(data_type, unique_host_ids_2)
+    # print("------------------------------")
+    # unique_host_ids_2 = increased_df_2['host_id'].unique()
+    # print_query(data_type, unique_host_ids_2)
 
-    print("------------------------------")
-    unique_host_ids_3 = increased_df_3['host_id'].unique()
-    print_query(data_type, unique_host_ids_3)
-
-
+    # print("------------------------------")
+    # unique_host_ids_3 = increased_df_3['host_id'].unique()
+    # print_query(data_type, unique_host_ids_3)
 
 
+    # df = df[df['host_id'].isin(unique_host_ids)]
+    # plot_title = "Host IDs in " + plot_title + " that increased by more than " + str(percentile) + "% after 1.16.2 activation"
+    # if plot_flag:
+    #     plot_dataframe(df, plot_title, data_type, False)
+    # # plot_dataframe(union_df, plot_title, data_type, False)
 
 
-    df = df[df['host_id'].isin(unique_host_ids)]
-    plot_title = "Host IDs in " + plot_title + " that increased by more than " + str(percentile) + "% after 1.16.2 activation"
-    if plot_flag:
-        plot_dataframe(df, plot_title, data_type, False)
-    # plot_dataframe(union_df, plot_title, data_type, False)
-
-
-    if host_id != '' and plot_flag:
-        plot_title = "Host ID: " + host_id
-        df_specific_host = df[df['host_id'] == host_id].copy()
-        plot_dataframe(df_specific_host, plot_title, data_type, False)
+    # if host_id != '' and plot_flag:
+    #     plot_title = "Host ID: " + host_id
+    #     df_specific_host = df[df['host_id'] == host_id].copy()
+    #     plot_dataframe(df_specific_host, plot_title, data_type, False)
