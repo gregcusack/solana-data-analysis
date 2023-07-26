@@ -86,7 +86,7 @@ def get_validator_data(data_type):
         # Drop duplicates based on "time" and "host_id"
         combined_df = combined_df.drop_duplicates(subset=["time", "host_id"], keep="first")
         return combined_df
-    elif data_type == "new_pull_requests_count":
+    elif data_type == "new_pull_requests_count" or data_type == "table_size":
         file_name = "../data/last_30_days_" + data_type + "_7_10_7_25_1hr.csv" 
     else:
         file_name = "../data/last_30_days_" + data_type + "_7_2_7_16_1hr.csv" 
@@ -342,9 +342,15 @@ def get_df_post_activation(df):
 
     return filtered_df
 
-def plot_by_time_aggregator(df, data_type, aggregator, bottom_percentile, top_percentile):
+def plot_by_time_aggregator(df, data_type, aggregator, bottom_percentile, top_percentile, *args):
+    which_N = "all"
+    if args:
+        which_N = args[0]
+        count = args[1]
     column_name = "mean_" + data_type
     data_name = aggregator + "_" + data_type
+    if data_type == "push_pull_ratio":
+        column_name = "push_pull_ratio"
     if aggregator == "median":
         aggregated_df = df.groupby('time')[column_name].median().reset_index()
     else:
@@ -359,12 +365,13 @@ def plot_by_time_aggregator(df, data_type, aggregator, bottom_percentile, top_pe
     plt.axvline(x=line_time, color='orange', linestyle='--', label='1.16.3 Activation Date')
     line_time = pd.to_datetime("2023-07-17 18:44:00")
     plt.axvline(x=line_time, color='green', linestyle='--', label='1.16.4 Activation Date')
-    
-
-
 
     # plt.ylim(30000, 38000)  # Set the maximum limit to 100
-    plot_title = data_name + '_' + str(bottom_percentile) + '-' + str(top_percentile) + '% stake'
+    plot_title = data_name + '_' + str(bottom_percentile) + '-' + str(top_percentile) + '% stake. '
+    plot_title += which_N
+    if which_N != "all":
+        plot_title += " " + str(count)
+    plot_title += " validators"
 
     # Plot the mean values
     plt.plot(aggregated_df['time'], aggregated_df[column_name])
@@ -649,13 +656,23 @@ def plot_top_N_movers(validator_df, data_type, top_N_host_ids, bottom_percentile
 
     plt.show()
 
-def plot_ratio(push_df, pull_df, bottom_percentile, top_percentile, plot_top_N, percentile):
-    if plot_top_N:
-        top_N_host_ids = get_top_N_largest_engress_by_host_id(push_df, percentile)
-        push_df = push_df[push_df['host_id'].isin(top_N_host_ids.index)]
-        push_df["time"] = pd.to_datetime(push_df["time"], format="%Y-%m-%dT%H:%M:%S.%fZ")
-        pull_df = pull_df[pull_df['host_id'].isin(top_N_host_ids.index)]
-        pull_df["time"] = pd.to_datetime(pull_df["time"], format="%Y-%m-%dT%H:%M:%S.%fZ")
+def get_N(df_1, df_2, which_N, N):
+    top_N_host_ids = get_top_N_largest_engress_by_host_id(df_1, N)
+    df_1["time"] = pd.to_datetime(df_1["time"], format="%Y-%m-%dT%H:%M:%S.%fZ")
+    df_2["time"] = pd.to_datetime(df_2["time"], format="%Y-%m-%dT%H:%M:%S.%fZ")
+
+    if which_N == "top":
+        df_1 = df_1[df_1['host_id'].isin(top_N_host_ids.index)]
+        df_2 = df_2[df_2['host_id'].isin(top_N_host_ids.index)]
+    else:
+        df_1 = df_1[~df_1['host_id'].isin(top_N_host_ids.index)]
+        df_2 = df_2[~df_2['host_id'].isin(top_N_host_ids.index)]
+
+    return df_1, df_2
+
+def create_ratio_df(push_df, pull_df, which_N, N):
+    if which_N == "top" or which_N == "bottom":
+        push_df, pull_df = get_N(push_df, pull_df, which_N, N)
 
     # Merge the two dataframes on 'time' and 'host_id' to get overlapping data
     merged_df = push_df.merge(pull_df, on=['time', 'host_id'], how='inner')
@@ -665,6 +682,11 @@ def plot_ratio(push_df, pull_df, bottom_percentile, top_percentile, plot_top_N, 
 
     # Drop any redundant columns if needed
     merged_df.drop(columns=['mean_packets_sent_push_messages_count', 'mean_new_pull_requests_count'], inplace=True)
+
+    return merged_df
+
+def plot_ratio(push_df, pull_df, bottom_percentile, top_percentile, plot_top_N, N):
+    merged_df = create_ratio_df(push_df, pull_df, plot_top_N, N)
 
     plt.figure(figsize=(18, 10))  # Width: 12 inches, Height: 6 inches
     plt.grid()
@@ -677,14 +699,15 @@ def plot_ratio(push_df, pull_df, bottom_percentile, top_percentile, plot_top_N, 
 
     grouped = merged_df.groupby('host_id')
     for host_id, group in grouped:
-        plt.plot(group['time'], group['push_pull_ratio'], label=f'Host ID {host_id}')
+        plt.plot(group['time'], group['push_pull_ratio'], label=f'{host_id}')
 
     plt.xlabel('Time')
     plt.ylabel("ratio push/pull requests")
-    plot_title = "ratio push/pull requests. stake range: " + str(bottom_percentile) + '-' + str(top_percentile) + '%'
+    plot_title = "ratio of push to pull requests. stake range: " + str(bottom_percentile) + '-' + str(top_percentile) + '%'
     plt.title(plot_title)
     plt.legend(title="Host ID", loc='upper center', bbox_to_anchor=(.5, -0.1), ncol=3)
     plt.tight_layout()
+    plt.savefig('./plots/' + plot_title + '.png', dpi=300)
 
     plt.show()
     
@@ -709,7 +732,6 @@ if __name__ == "__main__":
     
     plot_top_N = False
     if len(sys.argv) == 9:
-
         plot_top_N = True
 
     if aggregator not in aggregator_types:
@@ -768,7 +790,24 @@ if __name__ == "__main__":
         plot_ratio(push_df, pull_df, bottom_percentile, top_percentile, plot_top_N, int(percentile))
         sys.exit(0)
 
+    if data_type == "ratio-aggregate":
+        stakes = get_validator_stakes()
+        push_df, _ = get_validator_data_overlap("packets_sent_push_messages_count_abridged")
+        pull_df = get_validator_data("new_pull_requests_count")
 
+        push_df = merge_dataframes(push_df, stakes)
+        pull_df = merge_dataframes(pull_df, stakes)
+
+        push_df = get_dataframe_percentile(push_df, bottom_percentile, top_percentile)
+        pull_df = get_dataframe_percentile(pull_df, bottom_percentile, top_percentile)
+        
+        ratio_df = create_ratio_df(push_df, pull_df, "top", int(percentile))
+        plot_by_time_aggregator(ratio_df, "push_pull_ratio", aggregator, bottom_percentile, top_percentile, "top", int(percentile))
+                
+        ratio_df = create_ratio_df(push_df, pull_df, "bottom", int(percentile))
+        plot_by_time_aggregator(ratio_df, "push_pull_ratio", aggregator, bottom_percentile, top_percentile, "bottom", len(stakes) - int(percentile))
+
+        sys.exit(0)
 
 
 
