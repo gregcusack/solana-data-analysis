@@ -4,6 +4,9 @@ import matplotlib.pyplot as plt
 import sys
 import mplcursors
 import numpy as np
+import os
+from TopLevel import *
+from TransformData import *
 
 stake_columns_to_drop = [
     "lastVote", 
@@ -23,6 +26,29 @@ aggregator_types = [
     "mean",
     "median"
 ]
+
+MINIMUM_VALIDATOR_VERSION = (1, 16, 2)
+
+def load_data(data_type):
+    directory = "../data_2/"
+    files = [directory + filename for filename in os.listdir(directory) if filename.startswith(data_type)]
+    print(files)
+    df = pd.concat(map(pd.read_csv, files))
+    df["time"] = pd.to_datetime(df["time"], format="%Y-%m-%dT%H:%M:%S.%fZ")
+    df = df \
+            .sort_values(by=["time", "host_id"]) \
+            .reset_index(drop=True) \
+            .drop_duplicates(subset=["time", "host_id"], keep="first")
+    return df
+
+def aggregate_data_frame_by(df, data_type: str, aggregator: str):
+    column_name = "mean_" + data_type
+    if aggregator == "median":
+        aggregated_df = df.groupby('time')[column_name].median().reset_index()
+    else:
+        aggregated_df = df.groupby('time')[column_name].mean().reset_index()
+    return aggregated_df
+
 
 def get_validator_data(data_type):
     # file_name = "../data/"+ data_type + "_7_2_4am_7_6_4am_1hr.csv"
@@ -100,17 +126,10 @@ def get_validator_data(data_type):
     return df
 
 def get_validator_stakes():
-    # data = json.load(open('../data/validator_stakes.json'))
     data = json.load(open('../data/validator_stakes_new.json'))
     stakes = pd.DataFrame(data["validators"])
-    # stakes = stakes.drop(stake_columns_to_drop, axis=1)
     stakes = stakes.drop(stake_columns_to_drop, axis=1)
-    # stakes_filtered = stakes[stakes['version'] == '1.16.2']
-    # print(stakes['version'])
-
-    # stakes['version_tuple'] = stakes['version'].str.split('.').apply(lambda x: tuple(map(int, x)))
     stakes['version_tuple'] = stakes['version'].apply(lambda x: tuple(map(int, x.split('.'))) if x != "unknown" else None)
-
 
     # Define the target version
     target_version = (1, 16, 2)
@@ -149,6 +168,7 @@ def get_dataframe_percentile(df, bottom_percentile, top_percentile):
 def plot_dataframe(df, plot_title, data_type, set_y_axis_limits):
     # Group the data by "host_id" and plot each group
     data_name = "mean_" + data_type
+    plt.figure(figsize=(18, 10))  # Width: 12 inches, Height: 6 inches
     lines = []
     groupby_obj = df.groupby("host_id")
     for host_id, group in groupby_obj:
@@ -718,25 +738,52 @@ if __name__ == "__main__":
         print("error. need to pass in top and bottom percentile: python main.py <bottom> <top>")
         sys.exit(-1)
 
-    data_type = sys.argv[1]
-    bottom_percentile = int(sys.argv[2])
-    top_percentile = int(sys.argv[3])
-    percentile = float(sys.argv[4])
-    plot_flag = sys.argv[5].lower() == 'true'
+    data_type_movers = sys.argv[1]
+    data_type_results = sys.argv[2] # vanilla or actual data_type. vanilla prints aggregate
+    bottom_percentile = int(sys.argv[3])
+    top_percentile = int(sys.argv[4])
+    N = int(sys.argv[5]) # top N to get, N == -1, plot all
     aggregator = sys.argv[6] # mean or median
-    # print(plot_flag)    
-
-    host_id = ''
-    if len(sys.argv) == 8:
-        host_id = sys.argv[7]
-    
-    plot_top_N = False
-    if len(sys.argv) == 9:
-        plot_top_N = True
 
     if aggregator not in aggregator_types:
         print("invalid aggregator passed in: " + aggregator)
         sys.exit(-1)
+    
+    movers_df = TransformData.loadData(data_type_movers)
+    results_df = None if data_type_results == "vanilla" else TransformData.loadData(data_type_results)
+    stakes_df = TransformData.loadStakes(MINIMUM_VALIDATOR_VERSION)
+    df = TransformData.mergeDataframes(movers_df, stakes_df)
+    df = TransformData.getDataframePercentile(df, bottom_percentile, top_percentile)
+
+    if not results_df:
+        plot = Plotter(data_type_movers, (bottom_percentile, top_percentile))
+        plot_type = sys.argv[7]
+        if plot_type == "aggregate":
+            df = TransformData.aggregate_data_frame_by(df, data_type_movers, aggregator)
+        plot.plot_2(df, plot_type)
+
+    sys.exit(0)
+
+
+    data = load_data(data_type_movers)
+    stakes = get_validator_stakes()
+    df = merge_dataframes(data, stakes)
+    percentile_df = get_dataframe_percentile(df, bottom_percentile, top_percentile)
+    
+
+    if data_type_results == "vanilla":
+        plot_type = sys.argv[7] # individual or aggregate
+        plot_title = str(bottom_percentile) + "-" + str(top_percentile) + "%-ile by stake"
+        if plot_type == "aggregate":
+            aggregate_data_frame_by(percentile_df, data_type_movers, aggregator)
+        if plot_type == "individual":
+            plot_dataframe(percentile_df, plot_title, data_type_movers, False)
+        else:
+            unique_host_ids = percentile_df['host_id'].unique()
+            print_query(data_type_movers, unique_host_ids)
+            plot_by_time_aggregator(percentile_df, data_type_movers, aggregator, bottom_percentile, top_percentile)
+
+    sys.exit(0)
 
     if data_type == "overlap":
         df_1, df_2 = get_validator_data_overlap(data_type)
@@ -754,7 +801,7 @@ if __name__ == "__main__":
         df_1 = merge_dataframes(df_1, stakes)
         validator_new_data = get_validator_data("validator")
         percentile_df = get_dataframe_percentile(df_1, bottom_percentile, top_percentile)
-        plot_top_N_largest_increases_in_egress(percentile_df, validator_new_data, int(percentile), bottom_percentile, top_percentile)
+        plot_top_N_largest_increases_in_egress(percentile_df, validator_new_data, int(N), bottom_percentile, top_percentile)
         sys.exit(0)
 
     if data_type == "validator_restarts":
@@ -763,7 +810,7 @@ if __name__ == "__main__":
         stakes = get_validator_stakes()
         df_1 = merge_dataframes(df_1, stakes)
         percentile_df = get_dataframe_percentile(df_1, bottom_percentile, top_percentile)
-        do_validator_restarts(percentile_df, validator_new_data, int(percentile))
+        do_validator_restarts(percentile_df, validator_new_data, int(N))
         sys.exit(0)
 
     if data_type == "topN_validator_restarts":
@@ -772,7 +819,7 @@ if __name__ == "__main__":
         stakes = get_validator_stakes()
         df_1 = merge_dataframes(df_1, stakes)
         percentile_df = get_dataframe_percentile(df_1, bottom_percentile, top_percentile)
-        get_top_N_restarted_validators(percentile_df, validator_new_data, int(percentile))
+        get_top_N_restarted_validators(percentile_df, validator_new_data, int(N))
         sys.exit(0)
 
     # 1) packets_sent_push_messages_count and mean_new_pull_requests_count
@@ -787,7 +834,7 @@ if __name__ == "__main__":
         push_df = get_dataframe_percentile(push_df, bottom_percentile, top_percentile)
         pull_df = get_dataframe_percentile(pull_df, bottom_percentile, top_percentile)
         
-        plot_ratio(push_df, pull_df, bottom_percentile, top_percentile, plot_top_N, int(percentile))
+        plot_ratio(push_df, pull_df, bottom_percentile, top_percentile, plot_top_N, int(N))
         sys.exit(0)
 
     if data_type == "ratio-aggregate":
@@ -801,11 +848,11 @@ if __name__ == "__main__":
         push_df = get_dataframe_percentile(push_df, bottom_percentile, top_percentile)
         pull_df = get_dataframe_percentile(pull_df, bottom_percentile, top_percentile)
         
-        ratio_df = create_ratio_df(push_df, pull_df, "top", int(percentile))
-        plot_by_time_aggregator(ratio_df, "push_pull_ratio", aggregator, bottom_percentile, top_percentile, "top", int(percentile))
+        ratio_df = create_ratio_df(push_df, pull_df, "top", int(N))
+        plot_by_time_aggregator(ratio_df, "push_pull_ratio", aggregator, bottom_percentile, top_percentile, "top", int(N))
                 
-        ratio_df = create_ratio_df(push_df, pull_df, "bottom", int(percentile))
-        plot_by_time_aggregator(ratio_df, "push_pull_ratio", aggregator, bottom_percentile, top_percentile, "bottom", len(stakes) - int(percentile))
+        ratio_df = create_ratio_df(push_df, pull_df, "bottom", int(N))
+        plot_by_time_aggregator(ratio_df, "push_pull_ratio", aggregator, bottom_percentile, top_percentile, "bottom", len(stakes) - int(N))
 
         sys.exit(0)
 
@@ -836,8 +883,8 @@ if __name__ == "__main__":
         stakes = get_validator_stakes()
         egress_message_df = merge_dataframes(egress_message_df, stakes)
         egress_message_df = get_dataframe_percentile(egress_message_df, bottom_percentile, top_percentile)
-        top_N_host_ids = get_top_N_largest_engress_by_host_id(egress_message_df, int(percentile))
-        plot_top_N_movers(percentile_df, data_type, top_N_host_ids, bottom_percentile, top_percentile, int(percentile))
+        top_N_host_ids = get_top_N_largest_engress_by_host_id(egress_message_df, int(N))
+        plot_top_N_movers(percentile_df, data_type, top_N_host_ids, bottom_percentile, top_percentile, int(N))
     else:
         plot_by_time_aggregator(percentile_df, data_type, aggregator, bottom_percentile, top_percentile)
 
