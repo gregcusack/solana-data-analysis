@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
 
 class Plotter:
     def __init__(self, data_type, percentiles: tuple, action, *args):
@@ -16,11 +17,17 @@ class Plotter:
     def plot(self, df, plot_type, aggregator, data_name):
         plt.figure(figsize=(18, 10))  # Width: 12 inches, Height: 6 inches
         print(df.head(10))
-        if plot_type == "individual":
+        if data_name == "validator_restarts":
+            for host_id in df.columns.levels[1]:
+                x_values = df.index
+                jitter = pd.to_timedelta(np.random.uniform(-1, 1, size=len(x_values)), unit='h')
+                jittered_x_values = x_values + jitter
+                plt.scatter(jittered_x_values, df[('host_id', host_id)], marker='o', s=100, label=host_id)
+            plt.ylim(ymin=0)
+        elif plot_type == "individual":
             lines = []
             groupby_obj = df.groupby("host_id")
             for host_id, group in groupby_obj:
-                # label = f"{host_id} ({group['activatedStake'].iloc[0]})"
                 label = f"{host_id})"
                 line, = plt.plot(group["time"], group[data_name], label=label)
                 lines.append(line)
@@ -34,6 +41,8 @@ class Plotter:
         plt.axvline(x=line_time, color='orange', linestyle='--', label='1.16.3 Activation Date')
         line_time = pd.to_datetime("2023-07-17 18:44:00")
         plt.axvline(x=line_time, color='green', linestyle='--', label='1.16.4 Activation Date')
+        line_time = pd.to_datetime("2023-07-24 02:59:00")
+        plt.axvline(x=line_time, color='blue', linestyle='--', label='1.16.5 Activation Date')
         plt.xlabel('Time')
         plt.ylabel(self.data_name)
         # Set the y-axis limits

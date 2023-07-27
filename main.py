@@ -32,6 +32,7 @@ actions = [
     "topN",     # get top N host_ids in one data point. and plot those host_ids data in another metric
     "topN_inverse",  # plot all other data not in topN
     "ratio", # plot one metric over another metric
+    "validator_restarts",
 ]
 
 MINIMUM_VALIDATOR_VERSION = (1, 16, 2)
@@ -788,7 +789,8 @@ if __name__ == "__main__":
         if plot_type == "aggregate":
             df = TransformData.aggregate_data_frame_by(df, data_type_results, aggregator)
         plot = Plotter(data_type_results, (bottom_percentile, top_percentile), action, N, data_type_movers)
-        plot.plot(df, plot_type, aggregator, data_type_results)
+        data_name = "mean_" + data_type_results
+        plot.plot(df, plot_type, aggregator, data_name)
     elif action == "ratio":
         num_df = df
         denom_df = TransformData.mergeDataframes(results_df, stakes_df)
@@ -804,6 +806,21 @@ if __name__ == "__main__":
         data_name = data_type_movers + "/" + data_type_results
         plot = Plotter(data_name, (bottom_percentile, top_percentile), action, N, data_type_movers)
         plot.plot(ratio_df, plot_type, aggregator, "ratio")
+    elif action == "validator_restarts":
+        validator_new_df = results_df[results_df['host_id'].isin(top_N_host_ids)]
+        validator_new_df["time"] = pd.to_datetime(validator_new_df["time"], format="%Y-%m-%dT%H:%M:%S.%fZ")
+        validator_new_df = validator_new_df[['time', 'host_id']]
+
+        hourly_counts = validator_new_df.groupby('host_id').resample('1H', on="time").count()
+        hourly_counts = hourly_counts.loc[(hourly_counts != 0).any(axis=1)]
+        # Unstack the 'host_id' index to create separate columns for each host_id
+        hourly_counts = hourly_counts.unstack('host_id')
+
+        plot = Plotter(action, (bottom_percentile, top_percentile), action, N, data_type_movers)
+        plot.plot(hourly_counts, plot_type, aggregator, action)
+
+
+        sys.exit(0)
 
     sys.exit(0)
 
