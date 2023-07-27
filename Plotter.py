@@ -1,5 +1,4 @@
 import matplotlib.pyplot as plt
-import mplcursors
 import pandas as pd
 
 class Plotter:
@@ -14,9 +13,6 @@ class Plotter:
             if action == "topN_inverse":
                 self.plot_title += "All Validators excluding "
             self.plot_title += "Top " + str(self.N) + " " + data_type_movers + " Movers"
-
-
-        # self.plt = plt
 
     def plot(self, df, plot_type, aggregator):
         plt.figure(figsize=(18, 10))  # Width: 12 inches, Height: 6 inches
