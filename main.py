@@ -725,6 +725,7 @@ if __name__ == "__main__":
     plot_flag = sys.argv[5].lower() == 'true'
     aggregator = sys.argv[6] # mean or median
     # print(plot_flag)    
+    print(len(sys.argv))
 
     host_id = ''
     if len(sys.argv) == 8:
@@ -732,7 +733,7 @@ if __name__ == "__main__":
     
     plot_top_N = False
     if len(sys.argv) == 9:
-        plot_top_N = True
+        plot_top_N = sys.argv[8]
 
     if aggregator not in aggregator_types:
         print("invalid aggregator passed in: " + aggregator)
