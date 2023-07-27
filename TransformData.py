@@ -62,7 +62,10 @@ class TransformData:
     
     @staticmethod
     def aggregate_data_frame_by(df, data_type: str, aggregator: str):
-        column_name = "mean_" + data_type
+        if data_type == "ratio":
+            column_name = "ratio"
+        else:
+            column_name = "mean_" + data_type
         if aggregator == "median":
             aggregated_df = df.groupby('time')[column_name].median().reset_index()
         else:
@@ -92,9 +95,24 @@ class TransformData:
 
         return top_N_host_ids.index
     
-    # @staticmethod
+    @staticmethod
     def get_data_for_specific_host_ids(top_N_host_ids, results_df, include_top_N):
         if include_top_N:
             return results_df[results_df['host_id'].isin(top_N_host_ids)]
         else:
             return results_df[~results_df['host_id'].isin(top_N_host_ids)]
+        
+    @staticmethod
+    def create_ratio_df(num_df, denom_df, data_type_num, data_type_denom):
+        data_type_num = "mean_" + data_type_num
+        data_type_denom = "mean_" + data_type_denom
+        # Merge the two dataframes on 'time' and 'host_id' to get overlapping data
+        merged_df = num_df.merge(denom_df, on=['time', 'host_id'], how='inner')
+
+        # Calculate the division of push_messages by pull_messages
+        merged_df['ratio'] = merged_df[data_type_num] / merged_df[data_type_denom]
+
+        # Drop any redundant columns if needed
+        merged_df.drop(columns=[data_type_num, data_type_denom], inplace=True)
+
+        return merged_df
