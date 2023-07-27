@@ -27,6 +27,12 @@ aggregator_types = [
     "median"
 ]
 
+actions = [
+    "vanilla",  # plot a single metric. can aggregate or plot individual datapoints
+    "topN",     # get top N host_ids in one data point. and plot those host_ids data in another metric
+    "topN_inverse"  # plot all other data not in topN
+]
+
 MINIMUM_VALIDATOR_VERSION = (1, 16, 2)
 
 def load_data(data_type):
@@ -732,35 +738,54 @@ def plot_ratio(push_df, pull_df, bottom_percentile, top_percentile, plot_top_N, 
     plt.show()
     
 
-
 if __name__ == "__main__":
     if len(sys.argv) < 7:
         print("error. need to pass in top and bottom percentile: python main.py <bottom> <top>")
         sys.exit(-1)
 
-    data_type_movers = sys.argv[1]
-    data_type_results = sys.argv[2] # vanilla or actual data_type. vanilla prints aggregate
+    action = sys.argv[1]
+    if action not in actions:
+        print("error. invalid action provided. must be one of: ")
+        print(actions)
+        sys.exit(-1)
+
+    data_type_movers = sys.argv[2]
     bottom_percentile = int(sys.argv[3])
     top_percentile = int(sys.argv[4])
-    N = int(sys.argv[5]) # top N to get, N == -1, plot all
+    plot_type = sys.argv[5]
     aggregator = sys.argv[6] # mean or median
-
     if aggregator not in aggregator_types:
         print("invalid aggregator passed in: " + aggregator)
         sys.exit(-1)
-    
+
     movers_df = TransformData.loadData(data_type_movers)
-    results_df = None if data_type_results == "vanilla" else TransformData.loadData(data_type_results)
     stakes_df = TransformData.loadStakes(MINIMUM_VALIDATOR_VERSION)
     df = TransformData.mergeDataframes(movers_df, stakes_df)
     df = TransformData.getDataframePercentile(df, bottom_percentile, top_percentile)
 
-    if not results_df:
-        plot = Plotter(data_type_movers, (bottom_percentile, top_percentile))
-        plot_type = sys.argv[7]
+    if action == "vanilla":
+        plot = Plotter(data_type_movers, (bottom_percentile, top_percentile), action)
         if plot_type == "aggregate":
             df = TransformData.aggregate_data_frame_by(df, data_type_movers, aggregator)
-        plot.plot_2(df, plot_type)
+        plot.plot(df, plot_type, aggregator)
+        sys.exit(0)
+
+    if "topN" in action:
+        data_type_results = sys.argv[7] # vanilla or actual data_type. vanilla prints aggregate
+        N = int(sys.argv[8]) # top N to get, N == -1, plot all
+        results_df = TransformData.loadData(data_type_results)
+        top_N_host_ids = TransformData.get_top_N_largest_movers_by_host_id(df, data_type_movers, N)
+
+        if action == "topN":
+            df = TransformData.get_data_for_specific_host_ids(top_N_host_ids, results_df, True)
+        elif action == "topN_inverse":
+            df = TransformData.get_data_for_specific_host_ids(top_N_host_ids, results_df, False)
+
+        print(df.head(10))
+        if plot_type == "aggregate":
+            df = TransformData.aggregate_data_frame_by(df, data_type_results, aggregator)
+        plot = Plotter(data_type_results, (bottom_percentile, top_percentile), action, N, data_type_movers)
+        plot.plot(df, plot_type, aggregator)
 
     sys.exit(0)
 
@@ -770,19 +795,6 @@ if __name__ == "__main__":
     df = merge_dataframes(data, stakes)
     percentile_df = get_dataframe_percentile(df, bottom_percentile, top_percentile)
     
-
-    if data_type_results == "vanilla":
-        plot_type = sys.argv[7] # individual or aggregate
-        plot_title = str(bottom_percentile) + "-" + str(top_percentile) + "%-ile by stake"
-        if plot_type == "aggregate":
-            aggregate_data_frame_by(percentile_df, data_type_movers, aggregator)
-        if plot_type == "individual":
-            plot_dataframe(percentile_df, plot_title, data_type_movers, False)
-        else:
-            unique_host_ids = percentile_df['host_id'].unique()
-            print_query(data_type_movers, unique_host_ids)
-            plot_by_time_aggregator(percentile_df, data_type_movers, aggregator, bottom_percentile, top_percentile)
-
     sys.exit(0)
 
     if data_type == "overlap":

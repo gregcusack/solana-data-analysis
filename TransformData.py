@@ -68,3 +68,33 @@ class TransformData:
         else:
             aggregated_df = df.groupby('time')[column_name].mean().reset_index()
         return aggregated_df
+
+    @staticmethod
+    def get_top_N_largest_movers_by_host_id(df, data_type, N):
+        column_name = "mean_" + data_type
+        # Filter the DataFrame for the first 5 hours
+        first_5_hours_df = df[df['time'] < (df['time'].min() + pd.Timedelta(hours=5))]
+
+        # Calculate the mean of "egress_messages" for the first 5 hours for each "host_id"
+        mean_first_5_hours = first_5_hours_df.groupby('host_id')[column_name].mean()
+
+        # Filter the DataFrame for the last 5 hours
+        last_5_hours_df = df[df['time'] > (df['time'].max() - pd.Timedelta(hours=5))]
+
+        # Calculate the mean of "egress_messages" for the last 5 hours for each "host_id"
+        mean_last_5_hours = last_5_hours_df.groupby('host_id')[column_name].mean()
+
+        # Calculate the difference between the means for each "host_id"
+        difference_means = mean_last_5_hours - mean_first_5_hours
+
+        # Sort the "host_id" by the difference in descending order to get the top N host_ids
+        top_N_host_ids = difference_means.sort_values(ascending=False).head(N)
+
+        return top_N_host_ids.index
+    
+    # @staticmethod
+    def get_data_for_specific_host_ids(top_N_host_ids, results_df, include_top_N):
+        if include_top_N:
+            return results_df[results_df['host_id'].isin(top_N_host_ids)]
+        else:
+            return results_df[~results_df['host_id'].isin(top_N_host_ids)]
