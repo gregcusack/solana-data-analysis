@@ -3,20 +3,20 @@ import pandas as pd
 import numpy as np
 
 class Plotter:
-    def __init__(self, data_type, percentiles: tuple, action, *args):
+    def __init__(self, data_type, percentiles: tuple, *args):
         self.data_name = "mean_" + data_type
         self.bottom_percentile, self.top_percentile = percentiles
         self.plot_title = self.data_name + " - " + str(self.bottom_percentile) + "-" + str(self.top_percentile) + "%-ile by stake. "
-        if args is not None and args[0] > 0:
+        if len(args) > 0:
             N = args[0]
             data_type_movers = args[1]
-            if action == "topN_inverse":
+            if N < 0:
                 self.plot_title += "All Validators excluding "
+                N *= -1
             self.plot_title += "Top " + str(N) + " " + data_type_movers + " Movers"
 
     def plot(self, df, plot_type, aggregator, data_name):
         plt.figure(figsize=(18, 10))  # Width: 12 inches, Height: 6 inches
-        print(df.head(10))
         if data_name == "validator_restarts":
             for host_id in df.columns.levels[1]:
                 x_values = df.index
@@ -24,6 +24,8 @@ class Plotter:
                 jittered_x_values = x_values + jitter
                 plt.scatter(jittered_x_values, df[('host_id', host_id)], marker='o', s=100, label=host_id)
             plt.ylim(ymin=0)
+        elif data_name == "validator_new":
+             plt.plot(df.index, df.values, label='# of New Validators per Hour', marker='o', linestyle='-', markersize=3)
         elif plot_type == "individual":
             lines = []
             groupby_obj = df.groupby("host_id")
@@ -46,7 +48,8 @@ class Plotter:
         plt.xlabel('Time')
         plt.ylabel(self.data_name)
         # Set the y-axis limits
-        # plt.ylim(ymin=665000)
+        # plt.ylim(ymax=2600000)
+        # plt.ylim(ymin=650000)
         self.plot_title += ". " + plot_type
         if plot_type == "aggregate":
             self.plot_title += "-" + aggregator

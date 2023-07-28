@@ -30,7 +30,6 @@ aggregator_types = [
 actions = [
     "vanilla",  # plot a single metric. can aggregate or plot individual datapoints
     "topN",     # get top N host_ids in one data point. and plot those host_ids data in another metric
-    "topN_inverse",  # plot all other data not in topN
     "ratio", # plot one metric over another metric
     "validator_restarts",
 ]
@@ -766,9 +765,15 @@ if __name__ == "__main__":
     df = TransformData.getDataframePercentile(df, bottom_percentile, top_percentile)
 
     if action == "vanilla":
-        plot = Plotter(data_type_movers, (bottom_percentile, top_percentile), action)
+        print(df.head(10))
+        plot = Plotter(data_type_movers, (bottom_percentile, top_percentile))
         if plot_type == "aggregate":
             df = TransformData.aggregate_data_frame_by(df, data_type_movers, aggregator)
+        if data_type_movers != "validator_new":
+            data_type_movers = "mean_" + data_type_movers
+
+        # df_sort = df.sort_values(by=[data_type_movers, "host_id"], ascending=False)
+        # print(df_sort.head(10))
         plot.plot(df, plot_type, aggregator, data_type_movers)
         sys.exit(0)
     else:
@@ -776,19 +781,18 @@ if __name__ == "__main__":
         results_df = TransformData.loadData(data_type_results)
         N = int(sys.argv[8]) # top N to get, N == -1, plot all
         top_N_host_ids = None
-        if N > 0:
-            top_N_host_ids = TransformData.get_top_N_largest_movers_by_host_id(df, data_type_movers, N)
-
+        if N != 0:
+            if len(sys.argv) == 10:
+                top_N_host_ids = TransformData.get_top_N_largest_mean_data_by_host_id(df, data_type_movers, abs(N))
+            else:
+                top_N_host_ids = TransformData.get_top_N_largest_movers_by_host_id(df, data_type_movers, abs(N))
+            TransformData.print_top_N_host_ids(df, top_N_host_ids)
+            
     if "topN" in action:
-        if action == "topN":
-            df = TransformData.get_data_for_specific_host_ids(top_N_host_ids, results_df, True)
-        elif action == "topN_inverse":
-            df = TransformData.get_data_for_specific_host_ids(top_N_host_ids, results_df, False)
-
-        print(df.head(10))
+        df = TransformData.get_data_for_specific_host_ids(top_N_host_ids, results_df, N > 0)
         if plot_type == "aggregate":
             df = TransformData.aggregate_data_frame_by(df, data_type_results, aggregator)
-        plot = Plotter(data_type_results, (bottom_percentile, top_percentile), action, N, data_type_movers)
+        plot = Plotter(data_type_results, (bottom_percentile, top_percentile), N, data_type_movers)
         data_name = "mean_" + data_type_results
         plot.plot(df, plot_type, aggregator, data_name)
     elif action == "ratio":
@@ -798,27 +802,21 @@ if __name__ == "__main__":
         
         ratio_df = TransformData.create_ratio_df(num_df, denom_df, data_type_movers, data_type_results)
         if top_N_host_ids is not None:
-            ratio_df = TransformData.get_data_for_specific_host_ids(top_N_host_ids, ratio_df, True)
+                ratio_df = TransformData.get_data_for_specific_host_ids(top_N_host_ids, ratio_df, N > 0)
 
         if plot_type == "aggregate":
             ratio_df = TransformData.aggregate_data_frame_by(ratio_df, "ratio", aggregator)
 
         data_name = data_type_movers + "/" + data_type_results
-        plot = Plotter(data_name, (bottom_percentile, top_percentile), action, N, data_type_movers)
+        plot = Plotter(data_name, (bottom_percentile, top_percentile), N, data_type_movers)
         plot.plot(ratio_df, plot_type, aggregator, "ratio")
     elif action == "validator_restarts":
-        validator_new_df = results_df[results_df['host_id'].isin(top_N_host_ids)]
-        validator_new_df["time"] = pd.to_datetime(validator_new_df["time"], format="%Y-%m-%dT%H:%M:%S.%fZ")
-        validator_new_df = validator_new_df[['time', 'host_id']]
+        if top_N_host_ids is not None:
+            results_df = TransformData.get_data_for_specific_host_ids(top_N_host_ids, results_df, N > 0)
+        hourly_counts = TransformData.generate_validator_restart_counts(results_df)
 
-        hourly_counts = validator_new_df.groupby('host_id').resample('1H', on="time").count()
-        hourly_counts = hourly_counts.loc[(hourly_counts != 0).any(axis=1)]
-        # Unstack the 'host_id' index to create separate columns for each host_id
-        hourly_counts = hourly_counts.unstack('host_id')
-
-        plot = Plotter(action, (bottom_percentile, top_percentile), action, N, data_type_movers)
+        plot = Plotter(action, (bottom_percentile, top_percentile), N, data_type_movers)
         plot.plot(hourly_counts, plot_type, aggregator, action)
-
 
         sys.exit(0)
 

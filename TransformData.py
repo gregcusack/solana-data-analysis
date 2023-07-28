@@ -64,6 +64,9 @@ class TransformData:
     def aggregate_data_frame_by(df, data_type: str, aggregator: str):
         if data_type == "ratio":
             column_name = "ratio"
+        elif data_type == "validator_new":
+            df.set_index("time", inplace=True)
+            return df.resample('1H')['host_id'].nunique()
         else:
             column_name = "mean_" + data_type
         if aggregator == "median":
@@ -96,6 +99,15 @@ class TransformData:
         return top_N_host_ids.index
     
     @staticmethod
+    def get_top_N_largest_mean_data_by_host_id(df, data_type, N):
+        column_name = "mean_" + data_type
+
+        mean_data = df.groupby('host_id')[column_name].mean()
+        mean_data = mean_data.sort_values(ascending=False).head(N)
+        print(mean_data.head(N))
+        return mean_data.index
+    
+    @staticmethod
     def get_data_for_specific_host_ids(top_N_host_ids, results_df, include_top_N):
         if include_top_N:
             return results_df[results_df['host_id'].isin(top_N_host_ids)]
@@ -116,3 +128,30 @@ class TransformData:
         merged_df.drop(columns=[data_type_num, data_type_denom], inplace=True)
 
         return merged_df
+
+    @staticmethod
+    def generate_validator_restart_counts(df):
+        df["time"] = pd.to_datetime(df["time"], format="%Y-%m-%dT%H:%M:%S.%fZ")
+        validator_new_df = df[['time', 'host_id']]
+
+        hourly_counts = validator_new_df.groupby('host_id').resample('1H', on="time").count()
+        hourly_counts = hourly_counts.loc[(hourly_counts != 0).any(axis=1)]
+        # Unstack the 'host_id' index to create separate columns for each host_id
+        hourly_counts = hourly_counts.unstack('host_id')
+        return hourly_counts
+    
+
+    @staticmethod
+    def print_top_N_host_ids(df, top_N_host_ids):
+        print("Top N Host IDs by Stake")
+        df['percent_rank'] = df['activatedStake'].rank(pct=True) * 100
+        top_N_df = df[df['host_id'].isin(top_N_host_ids)]
+
+        top_N_df = top_N_df.drop_duplicates(subset='host_id')
+
+        for _, row in top_N_df.iterrows():
+            host_id = row['host_id']
+            activated_stake = row['activatedStake']
+            percentile_rank = row['percent_rank']
+
+            print(f"Host ID: {host_id}, Activated Stake: {activated_stake:.2f}, Percentile Rank: {percentile_rank:.2f}%")
